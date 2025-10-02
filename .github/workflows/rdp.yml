@@ -25,7 +25,7 @@ jobs:
           & $ngrokPath authtoken "33SvSKHkJLRsn36tZuPyFCTonRm_87acyWPUm5SHb282DTLeu"
           & $ngrokPath version
 
-      - name: 🧑‍💻 تفعيل RDP وإنشاء مستخدم
+      - name: 🧑‍💻 تفعيل RDP وإضافة المستخدم
         shell: powershell
         run: |
           net user kamel123 MyStrong123 /add
@@ -33,7 +33,7 @@ jobs:
           Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-      - name: 🚀 تشغيل ngrok TCP 3389 بالخلفية وعرض السجل
+      - name: 🚀 تشغيل ngrok TCP 3389 بالخلفية وتسجيل المخرجات
         shell: powershell
         run: |
           $ngrokPath = Get-ChildItem -Recurse -Filter "ngrok.exe" | Select-Object -First 1 -ExpandProperty FullName
@@ -45,7 +45,6 @@ jobs:
           $stdout = "$Env:RUNNER_TEMP\ngrok_stdout.log"
           $stderr = "$Env:RUNNER_TEMP\ngrok_stderr.log"
 
-          # تشغيل ngrok في الخلفية مع تسجيل الإخراج في ملفين مختلفين
           Start-Process -FilePath $ngrokPath -ArgumentList "tcp 3389" `
             -RedirectStandardOutput $stdout `
             -RedirectStandardError $stderr `
@@ -57,7 +56,7 @@ jobs:
           if (Test-Path $stdout) {
             Get-Content $stdout -Tail 100
           } else {
-            Write-Output "لم يتم العثور على سجل الإخراج."
+            Write-Output "لم يتم العثور على سجل ngrok stdout."
           }
 
           Write-Output "`n⚠️ ngrok STDERR:"
@@ -65,10 +64,10 @@ jobs:
             Get-Content $stderr -Tail 100
           }
 
-          # إبقاء الجلسة فعالة 3 دقائق (يمكنك زيادتها)
+          # إبقاء الجلسة فعالة لمدة 3 دقائق
           Write-Output "`n⏳ إبقاء الجلسة فعالة لمدة 180 ثانية..."
           Start-Sleep -Seconds 180
 
       - name: ✅ إنهاء المهمة
         shell: powershell
-        run: Write-Output "🎉 تم تنفيذ جميع الخطوات بنجاح"
+        run: Write-Output "🎉 تم تنفيذ كل الخطوات بنجاح!"
