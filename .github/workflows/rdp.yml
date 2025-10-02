@@ -5,32 +5,26 @@ on: [workflow_dispatch]
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
-      - name: Download ngrok
+      - name: 🧲 تنزيل ngrok
         shell: powershell
         run: |
           Invoke-WebRequest "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-windows-amd64.zip" -OutFile ngrok.zip
-          # فكّ الأرشيف داخل المجلد الحالي (.) — يضمن أن ngrok.exe يصبح في $PWD\ngrok.exe
           Expand-Archive -Path ngrok.zip -DestinationPath .
-          # اعرض محتويات للمراجعة (يساعد في الـ debugging)
-          Get-ChildItem -Recurse | Where-Object { $_.Name -like "ngrok*" } | Select-Object FullName
+          Get-ChildItem -Recurse -Filter "ngrok.exe"
 
-      - name: Set ngrok authtoken and list file
+      - name: 🔐 تعيين رمز مصادقة ngrok
         shell: powershell
         run: |
-          # إذا تم فكّي الأرشيف داخل مجلد فرعي، نبحث عن الملف ونخزّن المسار
           $ngrokPath = Get-ChildItem -Recurse -Filter "ngrok.exe" | Select-Object -First 1 -ExpandProperty FullName
           if (-not $ngrokPath) {
-            Write-Error "ngrok.exe not found after extracting archive"
+            Write-Error "❌ لم يتم العثور على ngrok.exe"
             exit 1
           }
-          Write-Output "Found ngrok at: $ngrokPath"
-          # ضع التوكن هنا (استبدل YOUR_TOKEN_HERE)
-          & $ngrokPath authtoken "33SvSKHkJLRsn36tZuPyFCTonRm_87acyWPUm5SHb282DTLeu"
-          # تأكد من أنه يعمل (طباعة نسخة)
-          & $ngrokPath version
+          & $ngrokPath authtoken "ضع_التوكن_الخاص_بك_هنا"
 
-      - name: Enable RDP (admin)
+      - name: 🖥️ تفعيل RDP (المستخدم والمسؤول)
         shell: powershell
         run: |
           net user kamel123 MyStrong123 /add
@@ -38,16 +32,30 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-      - name: Start ngrok TCP 3389 in background (show logs)
+      - name: 🚀 تشغيل ngrok TCP 3389 في الخلفية
         shell: powershell
         run: |
           $ngrokPath = Get-ChildItem -Recurse -Filter "ngrok.exe" | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $ngrokPath) { Write-Error "ngrok.exe not found"; exit 1 }
-          # Start ngrok as a background process and redirect output to a file we can read
+          if (-not $ngrokPath) {
+            Write-Error "❌ لم يتم العثور على ngrok.exe لتشغيل النفق"
+            exit 1
+          }
+
           $log = "$Env:RUNNER_TEMP\ngrok.log"
           Start-Process -FilePath $ngrokPath -ArgumentList "tcp 3389" -RedirectStandardOutput $log -RedirectStandardError $log -NoNewWindow
-          Start-Sleep -Seconds 5
-          # عرض آخر أسطر لنعرف عنوان النفق (إذا ظهر)
-          Get-Content $log -Tail 200 || Write-Output "No ngrok log yet"
-          # نطيل المهمة قليلاً حتى تُمكِّن المستخدم من رؤية النفق في الـ logs
-          Start-Sleep -Seconds 20
+          Start-Sleep -Seconds 8
+
+          if (Test-Path $log) {
+            Write-Output "📄 سجل ngrok:"
+            Get-Content $log -Tail 100
+          } else {
+            Write-Output "⚠️ لم يتم إنشاء سجل ngrok بعد."
+          }
+
+          # إبقاء الجلسة فعالة لبعض الوقت (2 دقائق تقريباً)
+          Write-Output "⏳ إبقاء الجلسة فعالة لمدة 120 ثانية..."
+          Start-Sleep -Seconds 120
+
+      - name: ✅ إكمال المهمة
+        shell: powershell
+        run: Write-Output "🎉 المهمة اكتملت بنجاح!"
