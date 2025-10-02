@@ -7,15 +7,47 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Download ngrok
+        shell: powershell
         run: |
-          Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
-          Expand-Archive ngrok.zip
-          ./ngrok.exe authtoken 33SvSKHkJLRsn36tZuPyFCTonRm_87acyWPUm5SHb282DTLeu
+          Invoke-WebRequest "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-windows-amd64.zip" -OutFile ngrok.zip
+          # فكّ الأرشيف داخل المجلد الحالي (.) — يضمن أن ngrok.exe يصبح في $PWD\ngrok.exe
+          Expand-Archive -Path ngrok.zip -DestinationPath .
+          # اعرض محتويات للمراجعة (يساعد في الـ debugging)
+          Get-ChildItem -Recurse | Where-Object { $_.Name -like "ngrok*" } | Select-Object FullName
 
-      - name: Enable RDP
+      - name: Set ngrok authtoken and list file
+        shell: powershell
+        run: |
+          # إذا تم فكّي الأرشيف داخل مجلد فرعي، نبحث عن الملف ونخزّن المسار
+          $ngrokPath = Get-ChildItem -Recurse -Filter "ngrok.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $ngrokPath) {
+            Write-Error "ngrok.exe not found after extracting archive"
+            exit 1
+          }
+          Write-Output "Found ngrok at: $ngrokPath"
+          # ضع التوكن هنا (استبدل YOUR_TOKEN_HERE)
+          & $ngrokPath authtoken "33SvSKHkJLRsn36tZuPyFCTonRm_87acyWPUm5SHb282DTLeu"
+          # تأكد من أنه يعمل (طباعة نسخة)
+          & $ngrokPath version
+
+      - name: Enable RDP (admin)
+        shell: powershell
         run: |
           net user kamel123 MyStrong123 /add
           net localgroup administrators kamel123 /add
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          ./ngrok.exe tcp 3389
+
+      - name: Start ngrok TCP 3389 in background (show logs)
+        shell: powershell
+        run: |
+          $ngrokPath = Get-ChildItem -Recurse -Filter "ngrok.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $ngrokPath) { Write-Error "ngrok.exe not found"; exit 1 }
+          # Start ngrok as a background process and redirect output to a file we can read
+          $log = "$Env:RUNNER_TEMP\ngrok.log"
+          Start-Process -FilePath $ngrokPath -ArgumentList "tcp 3389" -RedirectStandardOutput $log -RedirectStandardError $log -NoNewWindow
+          Start-Sleep -Seconds 5
+          # عرض آخر أسطر لنعرف عنوان النفق (إذا ظهر)
+          Get-Content $log -Tail 200 || Write-Output "No ngrok log yet"
+          # نطيل المهمة قليلاً حتى تُمكِّن المستخدم من رؤية النفق في الـ logs
+          Start-Sleep -Seconds 20
