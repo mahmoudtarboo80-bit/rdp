@@ -22,7 +22,7 @@ jobs:
             Write-Error "❌ لم يتم العثور على ngrok.exe"
             exit 1
           }
-          & $ngrokPath authtoken "ضع_التوكن_الخاص_بك_هنا"
+          & $ngrokPath authtoken "33SvSKHkJLRsn36tZuPyFCTonRm_87acyWPUm5SHb282DTLeu"
 
       - name: 🖥️ تفعيل RDP (المستخدم والمسؤول)
         shell: powershell
