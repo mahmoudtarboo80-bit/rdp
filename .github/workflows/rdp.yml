@@ -3,28 +3,25 @@ name: RDP
 on: [workflow_dispatch]
 
 jobs:
-  build:
+  rdp:
     runs-on: windows-latest
-
     steps:
-      - name: 🧲 تنزيل ngrok
+      - name: تنزيل ngrok
         shell: powershell
         run: |
           Invoke-WebRequest "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-windows-amd64.zip" -OutFile ngrok.zip
           Expand-Archive -Path ngrok.zip -DestinationPath .
-          Get-ChildItem -Recurse -Filter "ngrok.exe"
+          Get-ChildItem -Recurse -Filter "ngrok.exe" | Select-Object FullName
 
-      - name: 🔐 تعيين رمز مصادقة ngrok
+      - name: تعيين رمز مصادقة ngrok (مضمن مباشر)
         shell: powershell
         run: |
           $ngrokPath = Get-ChildItem -Recurse -Filter "ngrok.exe" | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $ngrokPath) {
-            Write-Error "❌ لم يتم العثور على ngrok.exe"
-            exit 1
-          }
+          if (-not $ngrokPath) { Write-Error "ngrok.exe not found"; exit 1 }
           & $ngrokPath authtoken "33SvSKHkJLRsn36tZuPyFCTonRm_87acyWPUm5SHb282DTLeu"
+          & $ngrokPath version
 
-      - name: 🖥️ تفعيل RDP (المستخدم والمسؤول)
+      - name: تفعيل RDP وإضافة مستخدم
         shell: powershell
         run: |
           net user kamel123 MyStrong123 /add
@@ -32,30 +29,24 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-      - name: 🚀 تشغيل ngrok TCP 3389 في الخلفية
+      - name: تشغيل ngrok TCP 3389 في الخلفية واستخراج العنوان
         shell: powershell
         run: |
           $ngrokPath = Get-ChildItem -Recurse -Filter "ngrok.exe" | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $ngrokPath) {
-            Write-Error "❌ لم يتم العثور على ngrok.exe لتشغيل النفق"
-            exit 1
-          }
+          if (-not $ngrokPath) { Write-Error "ngrok.exe not found"; exit 1 }
 
           $log = "$Env:RUNNER_TEMP\ngrok.log"
-          Start-Process -FilePath $ngrokPath -ArgumentList "tcp 3389" -RedirectStandardOutput $log -RedirectStandardError $log -NoNewWindow
-          Start-Sleep -Seconds 8
+          $proc = Start-Process -FilePath $ngrokPath -ArgumentList "tcp 3389" -RedirectStandardOutput $log -RedirectStandardError $log -NoNewWindow -PassThru
+          Start-Sleep -Seconds 6
 
-          if (Test-Path $log) {
-            Write-Output "📄 سجل ngrok:"
-            Get-Content $log -Tail 100
-          } else {
-            Write-Output "⚠️ لم يتم إنشاء سجل ngrok بعد."
+          if (Test-Path $log) { Write-Output "---- ngrok log ----"; Get-Content $log -Tail 200 } else { Write-Output "No ngrok log yet." }
+
+          try {
+            $tunnels = Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels" -ErrorAction Stop
+            if ($tunnels.tunnels.Count -gt 0) { foreach ($t in $tunnels.tunnels) { Write-Output "Tunnel: $($t.public_url)" } } else { Write-Output "No tunnels reported by ngrok API." }
+          } catch {
+            Write-Output "Could not query ngrok API (may not be available on runner)."
           }
 
-          # إبقاء الجلسة فعالة لبعض الوقت (2 دقائق تقريباً)
-          Write-Output "⏳ إبقاء الجلسة فعالة لمدة 120 ثانية..."
-          Start-Sleep -Seconds 120
-
-      - name: ✅ إكمال المهمة
-        shell: powershell
-        run: Write-Output "🎉 المهمة اكتملت بنجاح!"
+          Write-Output "Keeping session alive for 180 seconds..."
+          Start-Sleep -Seconds 180
