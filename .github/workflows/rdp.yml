@@ -1,73 +1,82 @@
 name: RDP
-
-on: [workflow_dispatch]
-
+on:
+  workflow_dispatch:
 jobs:
-  rdp:
+  secure-rdp:
     runs-on: windows-latest
-
+    timeout-minutes: 3600
     steps:
-      - name: 🧲 تحميل ngrok
-        shell: powershell
+      - name: Configure Core RDP Settings
         run: |
-          Invoke-WebRequest "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-windows-amd64.zip" -OutFile ngrok.zip
-          Expand-Archive -Path ngrok.zip -DestinationPath .
-          Get-ChildItem -Recurse -Filter "ngrok.exe" | Select-Object FullName
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+          netsh advfirewall firewall delete rule name="RDP-Tailscale"
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
 
-      - name: 🔐 تعيين رمز مصادقة ngrok
-        shell: powershell
+      - name: Create RDP User with Static Password
         run: |
-          $ngrokPath = Get-ChildItem -Recurse -Filter "ngrok.exe" | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $ngrokPath) {
-            Write-Error "❌ لم يتم العثور على ngrok.exe"
-            exit 1
-          }
-          & $ngrokPath authtoken "33SvSKHkJLRsn36tZuPyFCTonRm_87acyWPUm5SHb282DTLeu"
-          & $ngrokPath version
+          $password = "admin@123"
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
-      - name: 🧑‍💻 تفعيل RDP وإضافة المستخدم
-        shell: powershell
-        run: |
-          net user kamel123 MyStrong123 /add
-          net localgroup administrators kamel123 /add
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-
-      - name: 🚀 تشغيل ngrok TCP 3389 بالخلفية وتسجيل المخرجات
-        shell: powershell
-        run: |
-          $ngrokPath = Get-ChildItem -Recurse -Filter "ngrok.exe" | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $ngrokPath) {
-            Write-Error "❌ ngrok.exe غير موجود"
-            exit 1
+          if (-not (Get-LocalUser -Name "TOOLBOXLAP" -ErrorAction SilentlyContinue)) {
+              New-LocalUser -Name "TOOLBOXLAP" -Password $securePass -AccountNeverExpires
           }
 
-          $stdout = "$Env:RUNNER_TEMP\ngrok_stdout.log"
-          $stderr = "$Env:RUNNER_TEMP\ngrok_stderr.log"
+          Add-LocalGroupMember -Group "Administrators" -Member "TOOLBOXLAP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "TOOLBOXLAP"
 
-          Start-Process -FilePath $ngrokPath -ArgumentList "tcp 3389" `
-            -RedirectStandardOutput $stdout `
-            -RedirectStandardError $stderr `
-            -NoNewWindow -PassThru
+          echo "RDP_CREDS=User: TOOLBOXLAP | Password: $password" >> $env:GITHUB_ENV
 
-          Start-Sleep -Seconds 10
-
-          Write-Output "`n📄 ngrok STDOUT:"
-          if (Test-Path $stdout) {
-            Get-Content $stdout -Tail 100
-          } else {
-            Write-Output "لم يتم العثور على سجل ngrok stdout."
+          if (-not (Get-LocalUser -Name "TOOLBOXLAP")) {
+              Write-Error "User creation failed"
+              exit 1
           }
 
-          Write-Output "`n⚠️ ngrok STDERR:"
-          if (Test-Path $stderr) {
-            Get-Content $stderr -Tail 100
+      - name: Install Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+          $installerPath = "$env:TEMP\tailscale.msi"
+
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          Remove-Item $installerPath -Force
+
+      - name: Establish Tailscale Connection
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          $tsIP = $null
+          $retries = 0
+          while (-not $tsIP -and $retries -lt 10) {
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Start-Sleep -Seconds 5
+              $retries++
           }
+          if (-not $tsIP) {
+              Write-Error "Tailscale IP not assigned. Exiting."
+              exit 1
+          }
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-          # إبقاء الجلسة فعالة لمدة 3 دقائق
-          Write-Output "`n⏳ إبقاء الجلسة فعالة لمدة 180 ثانية..."
-          Start-Sleep -Seconds 180
+      - name: Verify RDP Accessibility
+        run: |
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
+          $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
+          if (-not $testResult.TcpTestSucceeded) {
+              Write-Error "TCP connection to RDP port 3389 failed"
+              exit 1
+          }
+          Write-Host "TCP connectivity successful!"
 
-      - name: ✅ إنهاء المهمة
-        shell: powershell
-        run: Write-Output "🎉 تم تنفيذ كل الخطوات بنجاح!"
+      - name: Maintain Connection
+        run: |
+          Write-Host "`n=== RDP ACCESS ==="
+          Write-Host "Address: $env:TAILSCALE_IP"
+          Write-Host "Username: TOOLBOXLAP"
+          Write-Host "Password: admin@123"
+          Write-Host "==================`n"
+          while ($true) {
+              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
+              Start-Sleep -Seconds 300
+          }
